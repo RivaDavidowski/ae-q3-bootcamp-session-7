@@ -1,0 +1,71 @@
+name: "Step PE-5 # Detect Destroy Complete — Lab Complete"
+
+on:
+  workflow_run:
+    workflows: ["Terraform Destroy — Todo Service Dev"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  find_exercise:
+    name: Find Exercise Issue
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    uses: skills/exercise-toolkit/.github/workflows/find-exercise-issue.yml@v0.4.0
+
+  post_completion:
+    name: Post Lab Completion
+    runs-on: ubuntu-latest
+    needs: [find_exercise]
+    if: needs.find_exercise.result == 'success'
+    env:
+      ISSUE_URL: ${{ needs.find_exercise.outputs.issue-url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get response templates
+        uses: actions/checkout@v4
+        with:
+          repository: skills/exercise-toolkit
+          path: exercise-toolkit
+          ref: v0.4.0
+
+      - name: Post destroy complete comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          body=$(cat <<'BODY'
+          ## ✅ Step 5 Complete — Infrastructure Torn Down
+
+          All AWS resources for the todo-service dev environment have been destroyed.
+
+          **Completed at:** TIMESTAMP
+          **Participant:** @PARTICIPANT
+
+          ### What was removed
+          - ECS Fargate cluster and all running tasks
+          - ECR repositories (backend + frontend images)
+          - Application Load Balancer and target group
+          - VPC, subnets, NAT gateway, and security groups
+          - CloudWatch log groups and IAM roles
+
+          The scoreboard will update momentarily with your lab completion record.
+          BODY
+          )
+          body="${body//TIMESTAMP/$now}"
+          body="${body//PARTICIPANT/$ACTOR}"
+          gh issue comment "$ISSUE_URL" --body "$body"
+
+      - name: Disable current workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow disable "5-pe-destroy.yml"
